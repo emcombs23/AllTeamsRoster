@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Team Roster Viewer</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 2em; }
+        h1 { text-align: center; }
+        .controls { margin-bottom: 2em; text-align: center; }
+        .roster-group { margin-bottom: 2em; }
+        .position-group { margin-bottom: 1em; }
+        .player-list { display: flex; flex-wrap: wrap; gap: 1em; }
+        .player-card { border: 1px solid #ccc; border-radius: 8px; padding: 1em; width: 180px; text-align: center; background: #fafafa; }
+        .player-card img { width: 80px; height: 80px; border-radius: 50%; object-fit: cover; margin-bottom: 0.5em; }
+        .subheading { font-weight: bold; margin-top: 1em; }
+    </style>
+</head>
+<body>
+    <h1>Team Roster Viewer</h1>
+    <div class="controls">
+        <label for="teamSelect">Team:</label>
+        <select id="teamSelect"></select>
+        <label for="weekSelect" style="margin-left:2em;">Week:</label>
+        <select id="weekSelect"></select>
+    </div>
+    <div id="roster"></div>
+    <script>
+    const CSV_FILE = 'allPlayers.csv';
+
+    // Helper to fetch and parse CSV (handles quoted fields)
+    async function fetchCSV(url) {
+        const res = await fetch(url);
+        const text = await res.text();
+        // Simple CSV parser for quoted fields
+        const lines = text.split('\n').filter(Boolean);
+        return lines.map(line => {
+            const regex = /(?:"([^"]*)")|([^,]+)/g;
+            const row = [];
+            let match;
+            let lastIndex = 0;
+            while ((match = regex.exec(line)) !== null) {
+                if (match[1] !== undefined) {
+                    row.push(match[1]);
+                } else if (match[2] !== undefined) {
+                    row.push(match[2]);
+                }
+                lastIndex = regex.lastIndex;
+            }
+            // If the line ends with a comma, add an empty string
+            if (line.endsWith(',')) row.push('');
+            return row;
+        });
+    }
+
+    // Group players by team_side and then by position
+    function groupPlayers(players) {
+        const groups = { 'Offense': {}, 'Defense': {}, 'Special Teams': {} };
+        for (const p of players) {
+            const side = p.team_side;
+            if (!groups[side]) groups[side] = {};
+            if (!groups[side][p.position]) groups[side][p.position] = [];
+            groups[side][p.position].push(p);
+        }
+        return groups;
+    }
+
+    // Render roster
+    function renderRoster(players) {
+        const rosterDiv = document.getElementById('roster');
+        rosterDiv.innerHTML = '';
+        const groups = groupPlayers(players);
+        for (const side of Object.keys(groups)) {
+            if (Object.keys(groups[side]).length === 0) continue;
+            const groupDiv = document.createElement('div');
+            groupDiv.className = 'roster-group';
+            groupDiv.innerHTML = `<h2>${side}</h2>`;
+            // Sort position subheadings alphabetically
+            const sortedPositions = Object.keys(groups[side]).sort((a, b) => a.localeCompare(b));
+            for (const position of sortedPositions) {
+                const posDiv = document.createElement('div');
+                posDiv.className = 'position-group';
+                posDiv.innerHTML = `<div class="subheading">${position}</div>`;
+                const playerList = document.createElement('div');
+                playerList.className = 'player-list';
+                // Sort players by jersey_number (as number)
+                const sortedPlayers = groups[side][position].slice().sort((a, b) => {
+                    const numA = parseInt(a.jersey_number, 10);
+                    const numB = parseInt(b.jersey_number, 10);
+                    if (isNaN(numA) && isNaN(numB)) return 0;
+                    if (isNaN(numA)) return 1;
+                    if (isNaN(numB)) return -1;
+                    return numA - numB;
+                });
+                for (const player of sortedPlayers) {
+                    const card = document.createElement('div');
+                    card.className = 'player-card';
+                    const headshot = player.headshot_url && player.headshot_url !== '' ? player.headshot_url : 'https://via.placeholder.com/80?text=No+Image';
+                    card.innerHTML = `
+                        <img src="${headshot}" alt="${player.player_name}">
+                        <div><strong>${player.player_name}</strong></div>
+                        <div>#${player.jersey_number}</div>
+                    `;
+                    playerList.appendChild(card);
+                }
+                posDiv.appendChild(playerList);
+                groupDiv.appendChild(posDiv);
+            }
+            rosterDiv.appendChild(groupDiv);
+        }
+    }
+
+    // Main logic
+    (async function() {
+        const rows = await fetchCSV(CSV_FILE);
+        const header = rows[0];
+        const data = rows.slice(1).map(row => Object.fromEntries(header.map((h, i) => [h, row[i]])));
+        // Get unique teams and weeks
+        const teams = [...new Set(data.map(p => p.team))].sort();
+        const weeks = [...new Set(data.map(p => p.week))].sort((a, b) => Number(a) - Number(b));
+        // Populate dropdowns
+        const teamSelect = document.getElementById('teamSelect');
+        teams.forEach(team => {
+            const opt = document.createElement('option');
+            opt.value = team;
+            opt.textContent = team;
+            teamSelect.appendChild(opt);
+        });
+        const weekSelect = document.getElementById('weekSelect');
+        weeks.forEach(week => {
+            const opt = document.createElement('option');
+            opt.value = week;
+            opt.textContent = week;
+            weekSelect.appendChild(opt);
+        });
+        // Filter and render on change
+        function updateRoster() {
+            const team = teamSelect.value;
+            const week = weekSelect.value;
+            const filtered = data.filter(p => p.team === team && p.week === week);
+            renderRoster(filtered);
+        }
+        teamSelect.addEventListener('change', updateRoster);
+        weekSelect.addEventListener('change', updateRoster);
+        // Initial render
+        teamSelect.selectedIndex = 0;
+        weekSelect.selectedIndex = 0;
+        updateRoster();
+    })();
+    </script>
+</body>
+</html>
